@@ -19,46 +19,57 @@ const { Server } = require('socket.io');
 // ===============================
 const app = express();
 
-
 // ===============================
 // 🌍 Allowed Origins Configuration
 // ===============================
-const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',')
-  : [];
+const allowedOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
+  : ['http://localhost:3000'];
 
-// ✅ Dynamic CORS setup (avoids multiple origin headers)
+console.log('✅ Allowed Origins:', allowedOrigins);
+
 app.use(
   cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // allow non-browser clients like Postman
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+    origin: (origin, callback) => {
+      // Allow requests without an origin (like Postman)
+      if (!origin) return callback(null, true);
+
+      // Allow subdomains and HTTPS variations
+      const isAllowed = allowedOrigins.some((allowed) =>
+        origin.includes(allowed.replace(/^https?:\/\//, ''))
+      );
+
+      if (isAllowed) return callback(null, true);
+      console.warn(`🚫 CORS blocked origin: ${origin}`);
       return callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
-    optionsSuccessStatus: 200, // for legacy browsers
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    optionsSuccessStatus: 200,
   })
 );
 
-
-// Security & optimization middleware
+// ===============================
+// 🛡️ Security & Optimization Middleware
+// ===============================
 app.use(helmet());
 app.use(compression());
 app.use(express.json({ limit: '10kb' }));
 
 // ===============================
-// 🛡️ Rate Limiting
+// 🧭 Rate Limiting
 // ===============================
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 mins
-  max: 150000000000000000000000000,
+  max: 1000, // limit each IP to 1000 requests per 15 minutes
   message: 'Too many requests from this IP, please try again later.',
 });
 app.use(limiter);
 
-// Temporary in-memory stores
+// ===============================
+// 💾 Temporary In-memory Stores
+// ===============================
 app.locals.wallets = {};
 app.locals.transactions = [];
 
@@ -74,17 +85,16 @@ const io = new Server(server, {
     credentials: true,
   },
   transports: ['websocket', 'polling'],
-  pingTimeout: 100000000000000000000000000000000,
+  pingTimeout: 60000,
 });
 
 app.set('io', io);
 
 // ===============================
-// 💬 Socket.IO Logic (with reconnect handling)
+// 💬 Socket.IO Logic
 // ===============================
 io.on('connection', (socket) => {
   const { userId, isAdmin } = socket.handshake.query;
-
   console.log('⚡ New socket connected:', socket.id);
 
   if (isAdmin === 'true') {
@@ -95,7 +105,6 @@ io.on('connection', (socket) => {
     console.log(`✅ User connected: ${userId}`);
   }
 
-  // Join a specific user room (for private chat)
   socket.on('joinUserRoom', ({ userId }) => {
     if (userId) {
       socket.join(userId);
@@ -103,19 +112,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // New message from user → forward to admins
   socket.on('newUserMessage', (msg) => {
     console.log('📨 New user message:', msg);
     io.to('admins').emit('newUserMessage', msg);
   });
 
-  // Admin reply → forward to that user
   socket.on('adminReply', (msg) => {
     console.log('💬 Admin reply:', msg);
     if (msg?.userId) io.to(msg.userId).emit('adminReply', msg);
   });
 
-  // Handle reconnect events gracefully
   socket.on('reconnect_attempt', () => {
     console.log(`🔄 Socket ${socket.id} attempting to reconnect...`);
   });
@@ -135,7 +141,6 @@ const transactionRoutes = require('./routes/transactionRoutes');
 const dailyTaskRoutes = require('./routes/dailyTaskRoutes');
 const earningsRoutes = require('./routes/earningsRoutes');
 const supportRoutes = require('./routes/supportRoutes');
-const mobileMoneyRoutes = require('./routes/mobileMoneyRoutes');
 
 // ===============================
 // 🚏 Mount Routes
@@ -147,7 +152,6 @@ app.use('/api/transactions', transactionRoutes);
 app.use('/api/daily-tasks', dailyTaskRoutes);
 app.use('/api/earnings', earningsRoutes);
 app.use('/api/support', supportRoutes);
-app.use('/api/mobilemoney', mobileMoneyRoutes);
 
 // ===============================
 // 🏁 Default Route
@@ -157,7 +161,7 @@ app.get('/', (req, res) => {
 });
 
 // ===============================
-// 🌐 Database Connection (cleaned)
+// 🌐 Database Connection
 // ===============================
 const connectDB = async () => {
   try {
@@ -168,19 +172,10 @@ const connectDB = async () => {
     process.exit(1);
   }
 
-  // Optional: handle MongoDB connection events
-  mongoose.connection.on('disconnected', () => {
-    console.warn('⚠️ MongoDB disconnected');
-  });
-
-  mongoose.connection.on('reconnected', () => {
-    console.log('🔄 MongoDB reconnected');
-  });
-
-  mongoose.set('strictQuery', true); // optional, but recommended
-  
+  mongoose.connection.on('disconnected', () => console.warn('⚠️ MongoDB disconnected'));
+  mongoose.connection.on('reconnected', () => console.log('🔄 MongoDB reconnected'));
+  mongoose.set('strictQuery', true);
 };
-
 
 // ===============================
 // ⏰ Cron Jobs / Scheduled Tasks
@@ -221,13 +216,8 @@ startServer();
 // ===============================
 // 🧩 Error Handlers
 // ===============================
+app.use((req, res) => res.status(404).json({ message: 'Route not found' }));
 
-// 404 Not Found
-app.use((req, res, next) => {
-  res.status(404).json({ message: 'Route not found' });
-});
-
-// Global Error Middleware
 app.use((err, req, res, next) => {
   console.error('🔥 Server error:', err);
   res.status(err.status || 500).json({
@@ -236,7 +226,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Handle uncaught exceptions / rejections
 process.on('uncaughtException', (err) => {
   console.error('💥 Uncaught Exception:', err);
   process.exit(1);
