@@ -19,27 +19,13 @@ const { Server } = require('socket.io');
 // ===============================
 const app = express();
 
-// Security & optimization middleware
-app.use(helmet());
-app.use(compression());
-app.use(express.json({ limit: '10kb' }));
-
-// Serve React build
-app.use(express.static(path.join(__dirname, './build')));
-
-app.use((req, res) => {
-  res.sendFile(path.resolve(__dirname, './build', 'index.html'));
-});
 
 // ===============================
 // 🌍 Allowed Origins Configuration
 // ===============================
-const allowedOrigins = [
-  'http://voltuganda.com',
-  'https://voltuganda.com',
-  'http://localhost:3000',
-  'http://localhost:4000',
-];
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',')
+  : [];
 
 // ✅ Dynamic CORS setup (avoids multiple origin headers)
 app.use(
@@ -52,8 +38,15 @@ app.use(
       return callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
+    optionsSuccessStatus: 200, // for legacy browsers
   })
 );
+
+
+// Security & optimization middleware
+app.use(helmet());
+app.use(compression());
+app.use(express.json({ limit: '10kb' }));
 
 // ===============================
 // 🛡️ Rate Limiting
