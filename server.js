@@ -131,6 +131,9 @@ io.on('connection', (socket) => {
   });
 });
 
+// Serve your public folder (for APK downloads)
+app.use('/downloads', express.static(path.join(__dirname, 'public')));
+
 // ===============================
 // 🧩 Route Imports
 // ===============================
