@@ -19,6 +19,9 @@ const { Server } = require('socket.io');
 // ===============================
 const app = express();
 
+// ✅ Tell Express to trust the Render proxy
+app.set('trust proxy', 1);
+
 // ===============================
 // 🌍 Allowed Origins Configuration
 // ===============================
@@ -198,20 +201,24 @@ const startServer = async () => {
     console.log(`✅ Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
   });
 
-  // Graceful shutdown
-  const shutdown = (signal) => {
+  // ✅ Graceful shutdown (fixed for Mongoose v7+)
+  const shutdown = async (signal) => {
     console.log(`⚠️ Received ${signal}. Closing gracefully...`);
-    runningServer.close(() => {
+    runningServer.close(async () => {
       console.log('🛑 Server closed.');
-      mongoose.connection.close(false, () => {
+      try {
+        await mongoose.connection.close();
         console.log('🔌 MongoDB connection closed.');
         process.exit(0);
-      });
+      } catch (err) {
+        console.error('💥 Error closing MongoDB:', err);
+        process.exit(1);
+      }
     });
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 };
 
 startServer();
